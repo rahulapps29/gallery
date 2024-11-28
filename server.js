@@ -122,7 +122,7 @@ app.post("/delete", async (req, res) => {
 });
 
 // Start the server
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 4021;
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
