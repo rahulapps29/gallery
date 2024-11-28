@@ -8,6 +8,15 @@ const path = require("path");
 
 const app = express();
 
+const mongoose = require("mongoose");
+const Image = require("./models/Image"); // Import the Image model
+
+// MongoDB connection
+mongoose
+  .connect(process.env.MONGODB_URI)
+  .then(() => console.log("Connected to MongoDB"))
+  .catch((err) => console.error("MongoDB connection error:", err));
+
 // Cloudinary configuration
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -43,19 +52,32 @@ app.get("/", (req, res) => {
 app.post("/upload", upload.single("image"), async (req, res) => {
   if (req.file) {
     try {
+      // Extract the original file name
       const originalName = path.parse(req.file.originalname).name;
 
+      // Upload to Cloudinary
       const result = await cloudinary.uploader.upload(req.file.path, {
-        public_id: `uploads/${originalName}`,
-        overwrite: true,
+        public_id: `uploads/${originalName}`, // Use original name as public_id
+        overwrite: true, // Overwrite if it already exists
       });
+
+      // Save to MongoDB
+      const image = new Image({
+        originalName: originalName, // Original file name
+        publicId: result.public_id, // Cloudinary public_id
+        url: result.secure_url, // Cloudinary URL
+      });
+      await image.save();
 
       res.render("uploaded", {
         imageUrl: result.secure_url,
         imageName: originalName,
       });
     } catch (error) {
-      console.error("Error uploading to Cloudinary:", error);
+      console.error(
+        "Error uploading to Cloudinary or saving to MongoDB:",
+        error
+      );
       res.status(500).send("Upload failed.");
     }
   } else {
@@ -66,21 +88,13 @@ app.post("/upload", upload.single("image"), async (req, res) => {
 // Gallery route to display uploaded images
 app.get("/gallery", async (req, res) => {
   try {
-    const resources = await cloudinary.search
-      .expression("folder:uploads")
-      .sort_by("public_id", "desc")
-      .max_results(30)
-      .execute();
+    // Fetch images from MongoDB
+    const images = await Image.find().sort({ createdAt: -1 });
 
-    const images = resources.resources.map((file) => ({
-      url: file.secure_url,
-      name: path.parse(file.public_id).name, // Extract the original file name
-      public_id: file.public_id,
-    }));
-
+    // Pass images to the gallery template
     res.render("gallery", { images });
   } catch (error) {
-    console.error("Error fetching gallery:", error);
+    console.error("Error fetching images from MongoDB:", error);
     res.status(500).send("Error loading gallery.");
   }
 });
@@ -89,11 +103,17 @@ app.get("/gallery", async (req, res) => {
 app.post("/delete", async (req, res) => {
   try {
     const { public_id } = req.body;
+
     if (!public_id) {
       return res.status(400).send("Public ID is required.");
     }
 
+    // Delete from Cloudinary
     await cloudinary.uploader.destroy(public_id);
+
+    // Delete from MongoDB
+    await Image.findOneAndDelete({ publicId: public_id });
+
     res.status(200).send("Image deleted successfully.");
   } catch (error) {
     console.error("Error deleting image:", error);

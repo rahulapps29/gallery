@@ -22,14 +22,22 @@
             <img
               src="<%= image.url %>"
               class="card-img-top img-thumbnail gallery-img"
-              alt="<%= image.name %>"
+              alt="<%= image.originalName %>"
               data-bs-toggle="modal"
               data-bs-target="#imageModal"
-              data-name="<%= image.name %>"
+              data-name="<%= image.originalName %>"
               data-url="<%= image.url %>"
             />
             <div class="card-body">
-              <h5 class="card-title text-center"><%= image.name %></h5>
+              <h5 class="card-title text-center"><%= image.originalName %></h5>
+              <div class="text-center mt-3">
+                <button
+                  class="btn btn-danger delete-btn"
+                  data-public-id="<%= image.publicId %>"
+                >
+                  Delete
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -83,6 +91,7 @@
         const modalTitle = document.getElementById("imageModalLabel");
         const modalDescription = document.getElementById("modalDescription");
 
+        // Show full-screen modal on image click
         galleryImages.forEach((img) => {
           img.addEventListener("click", () => {
             const src = img.getAttribute("data-url");
@@ -90,7 +99,36 @@
 
             modalImage.src = src;
             modalTitle.textContent = name;
-            modalDescription.textContent = `You are viewing: ${name}`;
+            modalDescription.textContent = `Viewing: ${name}`;
+          });
+        });
+
+        // Handle delete button clicks
+        const deleteButtons = document.querySelectorAll(".delete-btn");
+        deleteButtons.forEach((button) => {
+          button.addEventListener("click", async () => {
+            const publicId = button.getAttribute("data-public-id");
+            const card = button.closest(".col-md-4");
+
+            if (confirm("Are you sure you want to delete this image?")) {
+              try {
+                const response = await fetch("/delete", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ public_id: publicId }),
+                });
+
+                if (response.ok) {
+                  alert("Image deleted successfully.");
+                  card.remove();
+                } else {
+                  alert("Failed to delete the image.");
+                }
+              } catch (error) {
+                console.error("Error:", error);
+                alert("An error occurred while deleting the image.");
+              }
+            }
           });
         });
       });
