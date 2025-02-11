@@ -5,8 +5,10 @@ const { v2: cloudinary } = require("cloudinary");
 const { CloudinaryStorage } = require("multer-storage-cloudinary");
 const bodyParser = require("body-parser");
 const path = require("path");
-
+const axios = require("axios");
+const fs = require("fs");
 const app = express();
+// const path = require("path");
 
 const mongoose = require("mongoose");
 const Image = require("./models/Image"); // Import the Image model
@@ -120,6 +122,40 @@ app.post("/delete", async (req, res) => {
     res.status(500).send("Error deleting image.");
   }
 });
+
+// const axios = require("axios");
+// const fs = require("fs");
+
+
+app.get("/download/:id", async (req, res) => {
+  try {
+    const image = await Image.findById(req.params.id);
+    if (!image) {
+      return res.status(404).send("Image not found.");
+    }
+
+    // Fetch the image from Cloudinary URL
+    const response = await axios({
+      url: image.url,
+      method: "GET",
+      responseType: "stream",
+    });
+
+    // Set response headers for download
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${image.originalName}.jpg"`
+    );
+    res.setHeader("Content-Type", "image/jpeg");
+
+    response.data.pipe(res);
+  } catch (error) {
+    console.error("Error downloading image:", error);
+    res.status(500).send("Error downloading image.");
+  }
+});
+
+
 
 // Start the server
 const PORT = process.env.PORT || 4021;

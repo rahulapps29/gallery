@@ -31,6 +31,9 @@
             <div class="card-body">
               <h5 class="card-title text-center"><%= image.originalName %></h5>
               <div class="text-center mt-3">
+                <a href="/download/<%= image._id %>" class="btn btn-success">
+                  Download
+                </a>
                 <button
                   class="btn btn-danger delete-btn"
                   data-public-id="<%= image.publicId %>"
