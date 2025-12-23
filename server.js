@@ -1,161 +1,233 @@
 require("dotenv").config();
+
 const express = require("express");
+const bodyParser = require("body-parser");
+const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const cookieParser = require("cookie-parser");
+const path = require("path");
 const multer = require("multer");
+const axios = require("axios");
+
 const { v2: cloudinary } = require("cloudinary");
 const { CloudinaryStorage } = require("multer-storage-cloudinary");
-const bodyParser = require("body-parser");
-const path = require("path");
-const axios = require("axios");
-const fs = require("fs");
+
+const User = require("./models/User");
+const Image = require("./models/Image");
+
 const app = express();
-// const path = require("path");
 
-const mongoose = require("mongoose");
-const Image = require("./models/Image"); // Import the Image model
-
-// MongoDB connection
+/* =========================
+   MongoDB
+========================= */
 mongoose
   .connect(process.env.MONGODB_URI)
-  .then(() => console.log("Connected to MongoDB"))
-  .catch((err) => console.error("MongoDB connection error:", err));
+  .then(() => console.log("MongoDB connected"))
+  .catch((err) => console.error(err));
 
-// Cloudinary configuration
+/* =========================
+   Cloudinary
+========================= */
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Multer and Cloudinary storage setup
+/* =========================
+   Multer Storage
+========================= */
 const storage = new CloudinaryStorage({
-  cloudinary: cloudinary,
+  cloudinary,
   params: {
     folder: "uploads",
-    allowed_formats: ["jpg", "png", "jpeg", "webp"],
+    allowed_formats: ["jpg", "jpeg", "png", "webp"],
   },
 });
 
 const upload = multer({ storage });
 
-// Middleware
+/* =========================
+   Middleware
+========================= */
 app.set("view engine", "ejs");
-app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
+app.use(bodyParser.json());
+app.use(cookieParser());
 app.use(express.static("public"));
 
-// Routes
+/* =========================
+   JWT AUTH MIDDLEWARE
+========================= */
+function requireAuth(req, res, next) {
+  const token = req.cookies.token;
+  if (!token) return res.redirect("/login");
 
-// Home route for uploading images
-app.get("/", (req, res) => {
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch (err) {
+    return res.redirect("/login");
+  }
+}
+
+/* =========================
+   LOGIN PAGE
+========================= */
+app.get("/login", (req, res) => {
+  res.render("login", { error: null });
+});
+
+/* =========================
+   LOGIN HANDLER
+========================= */
+app.post("/login", async (req, res) => {
+  const { username, password } = req.body;
+
+  const user = await User.findOne({ username });
+  if (!user) {
+    return res.render("login", { error: "Invalid credentials" });
+  }
+
+  const isMatch = await bcrypt.compare(password, user.password);
+  if (!isMatch) {
+    return res.render("login", { error: "Invalid credentials" });
+  }
+
+  const token = jwt.sign(
+    { id: user._id, username: user.username },
+    process.env.JWT_SECRET,
+    { expiresIn: "1d" }
+  );
+
+  res.cookie("token", token, {
+    httpOnly: true,
+    sameSite: "strict",
+  });
+
+  res.redirect("/");
+});
+
+/* =========================
+   LOGOUT
+========================= */
+app.post("/logout", (req, res) => {
+  res.clearCookie("token");
+  res.redirect("/login");
+});
+
+/* =========================
+   UPLOAD PAGE (/)
+========================= */
+app.get("/", requireAuth, (req, res) => {
   res.render("index");
 });
 
-// Upload image route
-app.post("/upload", upload.single("image"), async (req, res) => {
-  if (req.file) {
-    try {
-      // Extract the original file name
-      const originalName = path.parse(req.file.originalname).name;
-
-      // Upload to Cloudinary
-      const result = await cloudinary.uploader.upload(req.file.path, {
-        public_id: `uploads/${originalName}`, // Use original name as public_id
-        overwrite: true, // Overwrite if it already exists
-      });
-
-      // Save to MongoDB
-      const image = new Image({
-        originalName: originalName, // Original file name
-        publicId: result.public_id, // Cloudinary public_id
-        url: result.secure_url, // Cloudinary URL
-      });
-      await image.save();
-
-      res.render("uploaded", {
-        imageUrl: result.secure_url,
-        imageName: originalName,
-      });
-    } catch (error) {
-      console.error(
-        "Error uploading to Cloudinary or saving to MongoDB:",
-        error,
-      );
-      res.status(500).send("Upload failed.");
-    }
-  } else {
-    res.status(400).send("No file uploaded.");
-  }
-});
-
-// Gallery route to display uploaded images
-app.get("/gallery", async (req, res) => {
+/* =========================
+   UPLOAD IMAGE
+========================= */
+app.post("/upload", requireAuth, upload.single("image"), async (req, res) => {
   try {
-    // Fetch images from MongoDB
-    const images = await Image.find().sort({ createdAt: -1 });
+    if (!req.file) return res.redirect("/");
 
-    // Pass images to the gallery template
-    res.render("gallery", { images });
-  } catch (error) {
-    console.error("Error fetching images from MongoDB:", error);
-    res.status(500).send("Error loading gallery.");
+    const originalName = path.parse(req.file.originalname).name;
+
+    const image = new Image({
+      originalName,
+      publicId: req.file.filename || req.file.public_id,
+      url: req.file.path,
+    });
+
+    await image.save();
+
+    res.redirect("/gallery");
+  } catch (err) {
+    console.error("Upload error:", err);
+    res.redirect("/");
   }
 });
 
-// Delete image route
-app.post("/delete", async (req, res) => {
+/* =========================
+   GALLERY
+========================= */
+app.get("/gallery", requireAuth, async (req, res) => {
+  const images = await Image.find().sort({ createdAt: -1 });
+  res.render("gallery", { images });
+});
+
+/* =========================
+   DELETE IMAGE
+========================= */
+app.post("/delete", requireAuth, async (req, res) => {
   try {
     const { public_id } = req.body;
+    if (!public_id) return res.redirect("/gallery");
 
-    if (!public_id) {
-      return res.status(400).send("Public ID is required.");
-    }
-
-    // Delete from Cloudinary
     await cloudinary.uploader.destroy(public_id);
-
-    // Delete from MongoDB
     await Image.findOneAndDelete({ publicId: public_id });
 
-    res.status(200).send("Image deleted successfully.");
-  } catch (error) {
-    console.error("Error deleting image:", error);
-    res.status(500).send("Error deleting image.");
+    res.redirect("/gallery");
+  } catch (err) {
+    console.error("Delete error:", err);
+    res.redirect("/gallery");
   }
 });
 
-// const axios = require("axios");
-// const fs = require("fs");
-
-app.get("/download/:id", async (req, res) => {
+/* =========================
+   RENAME IMAGE
+========================= */
+app.post("/rename", requireAuth, async (req, res) => {
   try {
-    const image = await Image.findById(req.params.id);
-    if (!image) {
-      return res.status(404).send("Image not found.");
+    const { id, newName } = req.body;
+
+    if (!id || !newName) {
+      return res.redirect("/gallery");
     }
 
-    // Fetch the image from Cloudinary URL
+    await Image.findByIdAndUpdate(id, {
+      originalName: newName.trim(),
+    });
+
+    res.redirect("/gallery");
+  } catch (err) {
+    console.error("Rename error:", err);
+    res.redirect("/gallery");
+  }
+});
+
+/* =========================
+   DOWNLOAD IMAGE
+========================= */
+app.get("/download/:id", requireAuth, async (req, res) => {
+  try {
+    const image = await Image.findById(req.params.id);
+    if (!image) return res.redirect("/gallery");
+
     const response = await axios({
       url: image.url,
       method: "GET",
       responseType: "stream",
     });
 
-    // Set response headers for download
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="${image.originalName}.jpg"`,
+      `attachment; filename="${image.originalName}.jpg"`
     );
     res.setHeader("Content-Type", "image/jpeg");
 
     response.data.pipe(res);
-  } catch (error) {
-    console.error("Error downloading image:", error);
-    res.status(500).send("Error downloading image.");
+  } catch (err) {
+    console.error("Download error:", err);
+    res.redirect("/gallery");
   }
 });
 
-// Start the server
+/* =========================
+   SERVER
+========================= */
 const PORT = process.env.PORT || 4021;
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`Server running at http://localhost:${PORT}`);
 });
