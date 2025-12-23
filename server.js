@@ -78,7 +78,7 @@ app.post("/upload", upload.single("image"), async (req, res) => {
     } catch (error) {
       console.error(
         "Error uploading to Cloudinary or saving to MongoDB:",
-        error
+        error,
       );
       res.status(500).send("Upload failed.");
     }
@@ -126,7 +126,6 @@ app.post("/delete", async (req, res) => {
 // const axios = require("axios");
 // const fs = require("fs");
 
-
 app.get("/download/:id", async (req, res) => {
   try {
     const image = await Image.findById(req.params.id);
@@ -144,7 +143,7 @@ app.get("/download/:id", async (req, res) => {
     // Set response headers for download
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="${image.originalName}.jpg"`
+      `attachment; filename="${image.originalName}.jpg"`,
     );
     res.setHeader("Content-Type", "image/jpeg");
 
@@ -154,8 +153,6 @@ app.get("/download/:id", async (req, res) => {
     res.status(500).send("Error downloading image.");
   }
 });
-
-
 
 // Start the server
 const PORT = process.env.PORT || 4021;
